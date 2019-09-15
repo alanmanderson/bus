@@ -1,0 +1,186 @@
+#!/usr/bin/python
+
+import httplib, json, re, sys
+import urllib, socket, time
+from xml.dom import minidom
+from pprint import pprint
+from subprocess import call
+
+def get_predictions():
+    #url = "http://webservices.nextbus.com//service/publicXMLFeed?command=predictionsForMultiStops&a=mbta&stops=1|1_010003v0_1|75&stops=1|1_010004v0_0|98&stops=1|1_010003v0_1|2167&stops=1|1_010003v0_1|75&stops=1|1_010003v0_1|2167&stops=1|1_010004v0_0|98&stops=747|747_7470001v0_1|2231&stops=747|747_7470001v0_1|11771&stops=747|747_7470001v0_1|22173&stops=747|747_7470002v0_0|21772&stops=747|747_7470002v0_0|21773&stops=78|78_780008v0_0|20761&stops=78|78_780005v0_0|2358&stops=78|78_780007v0_1|2326&stops=78|78_780004v0_1|2326&stops=76|76_760011v0_0|141&stops=76|76_760011v0_0|2358&stops=76|76_760010v0_1|2326&stops=76|76_760004v0_1|2326"
+    conn = httplib.HTTPConnection("webservices.nextbus.com")
+    conn.request("GET", "/service/publicXMLFeed?command=predictionsForMultiStops&a=mbta&stops=1|1_010017v0_0|93&stops=1|1_010017v0_0|97&stops=1|1_010016v0_1|2167&stops=1|1_010016v0_1|75&stops=701|701_7010021v0_0|97&stops=701|701_7010019v0_1|75&stops=747|747_7470007v0_0|2231&stops=747|747_7470009v0_1|11771&stops=747|747_7470009v0_1|22173&stops=747|747_7470007v0_0|21772&stops=747|747_7470007v0_0|21773&stops=78|78_780014v0_0|20761&stops=78|78_780015v0_0|2358&stops=78|78_780012v0_1|2326&stops=76|76_760011v0_0|141&stops=76|76_760011v0_0|2358&stops=76|76_760010v0_1|2326&stops=76|76_760004v0_1|2326&stops=47|47_470013v0_0|1807&stops=47|47_470013v0_0|1812&stops=47|47_470012v0_1|1770&stops=47|47_470012v0_1|9434&stops=85|85_850003v0_1|2510&stops=85|85_850003v0_1|2231_ar&stops=85|85_850004v0_0|2231&stops=85|85_850004v0_0|2612")
+    dom = minidom.parse(conn.getresponse())
+    conn.close()
+    body = dom.childNodes
+    routes = []
+    cur_route = ""
+    route = {}
+    for predictions in body[0].getElementsByTagName("predictions"):
+        stop = {}
+        routeTitle = predictions.getAttribute("routeTitle")
+        stopTitle = predictions.getAttribute("stopTitle")
+        #stopTitle = stopTitle + " %s" % (predictions.getElementsByTagName("direction").getAttribute("title"),)
+        if (cur_route != routeTitle):
+            if (len(route)!=0):
+                routes.append(route)
+            cur_route = routeTitle
+            route = {}
+            route[cur_route]=[]
+        stop[stopTitle] = []
+        for direction in predictions.getElementsByTagName("direction"):
+            for prediction in direction.getElementsByTagName("prediction"):
+                stop[stopTitle].append(prediction.getAttribute("minutes"))
+        route[cur_route].append(stop)
+    if (len(route)!=0):
+        routes.append(route)
+    return routes
+
+def get_predictions(link):
+    conn = httplib.HTTPConnection("webservices.nextbus.com")
+    try:
+        conn.request("GET", link)
+        dom = minidom.parse(conn.getresponse())
+        conn.close()
+        body = dom.childNodes
+        routes = []
+        cur_route = ""
+        route = {}
+        for predictions in body[0].getElementsByTagName("predictions"):
+            stop = {}
+            routeTitle = predictions.getAttribute("routeTitle")
+            stopTitle = predictions.getAttribute("stopTitle")
+            if (cur_route != routeTitle):
+                if (len(route)!=0):
+                    routes.append(route)
+                cur_route = routeTitle
+                route = {}
+                route[cur_route]=[]
+            stop[stopTitle] = []
+            for direction in predictions.getElementsByTagName("direction"):
+                for prediction in direction.getElementsByTagName("prediction"):
+                    stop[stopTitle].append(prediction.getAttribute("minutes"))
+            route[cur_route].append(stop)
+        if (len(route)!=0):
+            routes.append(route)
+        return routes
+    except socket.gaierror:
+        return {}
+
+def get_subway():
+    url = 'http://developer.mbta.com/Data/Red.json'
+    try:
+        f = urllib.urlopen(url)
+        result = f.read()
+        stopList = {'RKENN':'Kendall Out','RKENS':'Kendall In','RPRKN':'Park Ale','RPRKS':'Park AshBra','RPORS':'Porter In','RHARN':'Harvard Out', 'RHARS':'Harvard In', 'RALEN':'Alewife'}
+        preds = {}
+        obj = None
+        try:
+            obj = json.loads(result)
+        except ValueError:
+            return []
+        for prediction in obj:
+            stop = prediction['PlatformKey']
+            if stop in stopList:
+                if stopList[stop] not in preds:
+                    preds[stopList[stop]] = []
+                preds[stopList[stop]].append(prediction['TimeRemaining'])
+        return preds
+    except IOError:
+        return []
+
+def get_nextbus(args):
+    url = 'http://www.nextbus.com/predictor/fancyNewPredictionLayer.jsp?' + args
+    f=None
+    #f = urllib.urlopen(url)
+    try:
+        f = urllib.urlopen(url)
+    except IOError:
+        return []
+    result = f.read()
+    valStr = result.split('<td colspan="2"> <span style="font-size: 48px; font-weight: bold; vertical-align: bottom; line-height: 1.1em;">&nbsp;')
+    preds = []
+    for i in xrange(1,len(valStr)):
+        cur = ""
+        for j in xrange(0,3):
+            if valStr[i][j]!="<":
+                cur+= valStr[i][j]
+            else:
+                break
+        preds.append(cur)
+    valStr = result.split('<div class="right"><span style="font-size: 48px; font-weight: bold; vertical-align: bottom; line-height: 1.1em;">&nbsp;')
+    for i in xrange(1,len(valStr)):
+        cur = ""
+        for j in xrange(0,3):
+            if valStr[i][j]!="<":
+                cur+= valStr[i][j]
+            else:
+                break
+        preds.append(cur)
+    valStr = result.split('<div class="right"><span style="font-size: 24px; font-weight: bold; vertical-align: bottom; line-height: 1.2em;">&nbsp;')
+    for i in xrange(1,len(valStr)):
+        cur = ""
+        for j in xrange(0,3):
+            if valStr[i][j]!="<":
+                cur+= valStr[i][j]
+            else:
+                break
+        preds.append(cur)
+    return preds
+
+def main():
+    saveout = sys.stdout
+#fsock = open('/mit/alanma/web_scripts/bus/out.log', 'w')
+#sys.stdout = fsock                                       
+#print json.dumps(get_predictions())
+#fsock.close()
+#call(["cp","out.log","out.log.copy"])
+
+    fsock = open('/mit/alanma/web_scripts/bus/train.log','w')
+    sys.stdout = fsock
+    print json.dumps(get_subway())
+#sys.stdout = saveout
+    fsock.close()
+#call(["cp","train.log","train.log.copy"])
+
+    fsock = open('/mit/alanma/web_scripts/bus/shuttle.log','w')
+    sys.stdout = fsock
+    curstop = "SafeRide CamWest Tang/West"
+    preds={}
+    preds[curstop]=get_nextbus("a=mit&r=saferidecambwest&d=frcamp&s=tangwest&ts=simmhl")
+    curstop = "SafeRide CamWest 84 Mass Ave."
+    preds[curstop]=get_nextbus("a=mit&r=saferidecambwest&d=frcamp&s=mass84_d&ts=mccrmk")
+    curstop = "SafeRide CamWest Shaw's."
+    preds[curstop]=get_nextbus("a=mit&r=saferidecambwest&d=tocamp&s=sydgreen&ts=paci70")
+    curstop = "SafeRide CamEast Kendall"
+    preds[curstop]=get_nextbus("a=mit&r=saferidecambeast&d=tocamp&s=kendsq&ts=wadse40")
+    curstop = "Tech Shuttle TangWest"
+    preds[curstop]=get_nextbus("a=mit&r=tech&d=wcamp&s=tangwest&ts=tangwest")
+    curstop = "Tech Shuttle Kendall"
+    preds[curstop]=get_nextbus("a=mit&r=tech&d=wcamp&s=kendsq_d&ts=amhewads")
+    print json.dumps(preds)
+    fsock.close()
+#call(["cp","shuttle.log","shuttle.log.copy"])
+
+    MBTABusLink="/service/publicXMLFeed?command=predictionsForMultiStops&a=mbta&stops=1|1_010017v0_0|93&stops=1|1_010017v0_0|97&stops=1|1_010016v0_1|2167&stops=1|1_010016v0_1|75&stops=701|701_7010021v0_0|97&stops=701|701_7010019v0_1|75&stops=747|747_7470007v0_0|2231&stops=747|747_7470009v0_1|11771&stops=747|747_7470009v0_1|22173&stops=747|747_7470007v0_0|21772&stops=747|747_7470007v0_0|21773&stops=78|78_780014v0_0|20761&stops=78|78_780015v0_0|2358&stops=78|78_780012v0_1|2326&stops=78|78_780012v0_1|2326&stops=76|76_760011v0_0|141&stops=76|76_760011v0_0|2358&stops=76|76_760010v0_1|2326&stops=76|76_760004v0_1|2326&stops=47|47_470013v0_0|1807&stops=47|47_470013v0_0|1812&stops=47|47_470012v0_1|1770&stops=47|47_470012v0_1|9434&stops=85|85_850003v0_1|2510&stops=85|85_850003v0_1|2231_ar&stops=85|85_850004v0_0|2231&stops=85|85_850004v0_0|2612"
+
+    MITBusLink="/service/publicXMLFeed?command=predictionsForMultiStops&a=mit&stops=tech|wcamp|tangwest&stops=tech|wcamp|kres&stops=tech|wcamp|kendsq_d&stops=saferidecambwest|frcamp|tangwest&stops=saferidecambwest|tocamp|sydgreen&stops=saferidecambwest|tocamp|kendsq&stops=saferidecambwest|tocamp|mass77"
+    try:
+        fsock = open('/mit/alanma/web_scripts/bus/mbta.log', 'w')
+        sys.stdout = fsock                                       
+        print json.dumps(get_predictions(MBTABusLink))
+        fsock.close()
+    except IOError:
+        pass
+    try:
+        fsock = open('/mit/alanma/web_scripts/bus/mit.log', 'w')
+        sys.stdout = fsock                                       
+        print json.dumps(get_predictions(MITBusLink))
+        fsock.close()
+    except IOError:
+        pass
+    sys.stdout = saveout
+
+main()
+time.sleep(30)
+main()
